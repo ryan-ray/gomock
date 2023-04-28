@@ -7,7 +7,7 @@ type Foo interface {
 }
 
 type Store[T, R any] interface {
-	Do(obj T) R
+	Do(obj T) (error, R, int, float64, string)
 	Create() Bar
 	CreateWithPointer() *Bar
 }

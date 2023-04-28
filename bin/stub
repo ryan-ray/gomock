@@ -1,0 +1,10 @@
+#! /usr/bin/env bash
+
+BIN=$(dirname -- "$0")
+
+OUT=$(./${BIN}/main "$@") && echo "${OUT}" | goimports | gofmt
+
+if [ $? -ne 0 ]; then
+  echo "Fail"
+  echo "${OUT}"
+fi

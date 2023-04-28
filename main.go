@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"flag"
@@ -18,18 +17,18 @@ import (
 type Interface struct {
 	Name     string
 	Methods  MethodList
-	Generics VariableList
+	Generics GenericList
 }
 
 type Method struct {
 	Name    string
-	Args    VariableList
-	Results Results
+	Params  ParamList
+	Returns Returns
 }
 
-type Results []string
+type Returns []string
 
-func (r Results) String() string {
+func (r Returns) Declaration() string {
 	if len(r) == 0 {
 		return ""
 	}
@@ -40,7 +39,7 @@ func (r Results) String() string {
 	return "(" + strings.Join(r, ", ") + ")"
 }
 
-func (r Results) Return() string {
+func (r Returns) String() string {
 	if len(r) == 0 {
 		return ""
 	}
@@ -88,7 +87,75 @@ func isPointer(s string) bool {
 
 type VariableList []Variable
 
-func FieldListToVariableList(fl *ast.FieldList) VariableList {
+func (vl VariableList) ToParams() string {
+	params := make([]string, len(vl))
+
+	for i, v := range vl {
+		params[i] = v.Name + " " + v.Type
+	}
+
+	return strings.Join(params, ", ")
+}
+
+func (vl VariableList) ToArgs() string {
+	args := make([]string, len(vl))
+
+	for i, v := range vl {
+		args[i] = v.Name
+	}
+
+	return strings.Join(args, ", ")
+}
+
+type ParamList struct {
+	VariableList
+}
+
+func (pl ParamList) Declaration() string {
+	if len(pl.VariableList) == 0 {
+		return ""
+	}
+
+	return pl.ToParams()
+}
+
+func (pl ParamList) Args() string {
+	args := make([]string, len(pl.VariableList))
+
+	for i, v := range pl.VariableList {
+		args[i] = v.Name
+	}
+
+	return strings.Join(args, ", ")
+}
+
+type GenericList struct {
+	VariableList
+}
+
+func (gl GenericList) Declaration() string {
+	if len(gl.VariableList) == 0 {
+		return ""
+	}
+
+	return "[" + gl.ToParams() + "]"
+}
+
+func (gl GenericList) Args() string {
+	if len(gl.VariableList) == 0 {
+		return ""
+	}
+
+	args := make([]string, len(gl.VariableList))
+
+	for i, v := range gl.VariableList {
+		args[i] = v.Name
+	}
+
+	return "[" + strings.Join(args, ", ") + "]"
+}
+
+func NewVariableList(fl *ast.FieldList) VariableList {
 	if fl == nil {
 		return nil
 	}
@@ -108,71 +175,7 @@ func FieldListToVariableList(fl *ast.FieldList) VariableList {
 	return vars
 }
 
-func (vl VariableList) Types() (types []string) {
-	types = make([]string, len(vl))
-	i := 0
-	for _, t := range vl {
-		types[i] = t.Type
-		i++
-	}
-	return
-}
-
-func (vl VariableList) Names() []string {
-	names := make([]string, 0)
-	for _, t := range vl {
-		names = append(names, t.Name)
-	}
-
-	return names
-}
-
-func (vl VariableList) ToParams() string {
-	params := make([]string, len(vl))
-
-	for i, v := range vl {
-		params[i] = v.Name + " " + v.Type
-	}
-
-	return strings.Join(params, ", ")
-}
-
-func (vl VariableList) ToGenericParams() string {
-	return "[" + vl.ToParams() + "]"
-}
-
-func (vl VariableList) ToArgs() string {
-	args := make([]string, len(vl))
-
-	for i, v := range vl {
-		args[i] = v.Name
-	}
-
-	return strings.Join(args, ", ")
-}
-
-func (vl VariableList) ToGenericArgs() string {
-	return "[" + vl.ToArgs() + "]"
-}
-
-func (ts VariableList) StringWith(prefix, suffix string) string {
-	if len(ts) == 0 {
-		return ""
-	}
-
-	var types []string
-	for _, t := range ts {
-		types = append(types, t.Name+" "+t.Type)
-	}
-
-	return prefix + strings.Join(types, ", ") + suffix
-}
-
-func (ts VariableList) String() string {
-	return ts.StringWith("", "")
-}
-
-func StringSliceFromFieldList(fl *ast.FieldList) []string {
+func ExtractVariableNames(fl *ast.FieldList) []string {
 	if fl == nil {
 		return nil
 	}
@@ -194,7 +197,7 @@ func StringSliceFromFieldList(fl *ast.FieldList) []string {
 	return sl
 }
 
-func MethodListFromInterfaceType(t *ast.InterfaceType) MethodList {
+func NewMethodList(t *ast.InterfaceType) MethodList {
 	methods := []Method{}
 
 	for _, m := range t.Methods.List {
@@ -207,8 +210,8 @@ func MethodListFromInterfaceType(t *ast.InterfaceType) MethodList {
 			continue
 		}
 
-		im.Args = FieldListToVariableList(fn.Params)
-		im.Results = StringSliceFromFieldList(fn.Results)
+		im.Params.VariableList = NewVariableList(fn.Params)
+		im.Returns = ExtractVariableNames(fn.Results)
 
 		methods = append(methods, im)
 	}
@@ -216,7 +219,7 @@ func MethodListFromInterfaceType(t *ast.InterfaceType) MethodList {
 	return methods
 }
 
-func InterfaceFromTypeSpec(t *ast.TypeSpec) (Interface, error) {
+func NewInterface(t *ast.TypeSpec) (Interface, error) {
 	im := Interface{}
 
 	it, ok := t.Type.(*ast.InterfaceType)
@@ -224,20 +227,15 @@ func InterfaceFromTypeSpec(t *ast.TypeSpec) (Interface, error) {
 		return im, errors.New("not an *ast.InterfaceType")
 	}
 
-	im.Name = t.Name.Name
-	im.Methods = MethodListFromInterfaceType(it)
-	im.Generics = FieldListToVariableList(t.TypeParams)
+	im.Name = t.Name.String()
+	im.Methods = NewMethodList(it)
+	im.Generics.VariableList = NewVariableList(t.TypeParams)
 
 	return im, nil
 }
 
-type File struct {
-	pkg        string
-	interfaces []Interface
-}
-
-func Inspect(src string, structs []string) (File, error) {
-	file := File{}
+func Inspect(src []byte, structs []string) (Source, error) {
+	file := Source{}
 
 	filter := make(map[string]struct{})
 	for _, intf := range structs {
@@ -253,13 +251,16 @@ func Inspect(src string, structs []string) (File, error) {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch t := n.(type) {
 		case *ast.File:
-			file.pkg = t.Name.Name
+			file.Pkg = t.Name.Name
 		case *ast.TypeSpec:
-			if intf, err := InterfaceFromTypeSpec(t); err == nil {
-				if _, ok := filter[intf.Name]; !ok && len(filter) > 0 {
-					break
+			if intf, err := NewInterface(t); err == nil {
+				if len(filter) > 0 {
+					if _, ok := filter[intf.Name]; !ok {
+						break
+					}
 				}
-				file.interfaces = append(file.interfaces, intf)
+
+				file.Interfaces = append(file.Interfaces, intf)
 			}
 		}
 		return true
@@ -268,47 +269,25 @@ func Inspect(src string, structs []string) (File, error) {
 	return file, nil
 }
 
+type Source struct {
+	Pkg        string
+	Interfaces []Interface
+}
+
 //go:embed mock.tmpl
-var mock string
+var stubTemplate string
 
-//func Render(w io.Writer, src string) error {
-func (f File) Render(w io.Writer) error {
-	tmpl := template.New("mock").
-		Funcs(map[string]any{
-			"lower": func(s string) string {
-				b := []byte(s)
-				b[0] = b[0] + 32
-				return string(b)
-			},
-			"join": strings.Join,
-			"args": func(params map[string]string) string {
-				args := []string{}
-				for k, v := range params {
-					args = append(args, k+" "+v)
-				}
-				return strings.Join(args, ", ")
-			},
-			"renderTypeArgs": func(params []string) string {
-				if len(params) == 0 {
-					return ""
-				}
+func (src Source) Render(w io.Writer) error {
+	if stubTemplate == "" {
+		panic(errors.New("empty template"))
+	}
 
-				return "[" + strings.Join(params, ", ") + "]"
-			},
-		})
-
-	tmpl, err := tmpl.Parse(mock)
+	tmpl, err := template.New("mock").Parse(stubTemplate)
 	if err != nil {
 		panic(err)
 	}
 
-	err = tmpl.Execute(w, struct {
-		PkgName    string
-		Interfaces []Interface
-	}{
-		f.pkg,
-		f.interfaces,
-	})
+	err = tmpl.Execute(w, struct{ Src Source }{src})
 	if err != nil {
 		panic(err)
 	}
@@ -316,24 +295,8 @@ func (f File) Render(w io.Writer) error {
 	return nil
 }
 
-func Load(filename string) (*bytes.Buffer, error) {
-	var buf bytes.Buffer
-
-	file, err := os.Open(filename)
-	if err != nil {
-		return &buf, err
-	}
-
-	_, err = io.Copy(&buf, file)
-	return &buf, err
-}
-
-var (
-	filename     string
-	structFilter string
-)
-
 func main() {
+	var filename, structFilter string
 
 	fs := flag.NewFlagSet("stub", flag.ExitOnError)
 
@@ -359,12 +322,17 @@ stub -filename src.go -filter MyInterface
 		os.Exit(1)
 	}
 
-	src, err := Load(filename)
+	var filter []string
+	if structFilter != "" {
+		filter = strings.Split(structFilter, ",")
+	}
+
+	src, err := os.ReadFile(filename)
 	if err != nil {
 		panic(err)
 	}
 
-	file, err := Inspect(src.String(), strings.Split(structFilter, ","))
+	file, err := Inspect(src, filter)
 	if err != nil {
 		panic(err)
 	}
