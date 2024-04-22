@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"text/template"
 )
@@ -287,10 +288,25 @@ func (src Source) Render(w io.Writer) error {
 		panic(err)
 	}
 
-	err = tmpl.Execute(w, struct{ Src Source }{src})
+	importsCmd := exec.Command("goimports")
+	stdin, err := importsCmd.StdinPipe()
 	if err != nil {
 		panic(err)
 	}
+
+	//err = tmpl.Execute(w, struct{ Src Source }{src})
+	err = tmpl.Execute(stdin, struct{ Src Source }{src})
+	if err != nil {
+		panic(err)
+	}
+	stdin.Close()
+
+	out, err := importsCmd.Output()
+	if err != nil {
+		panic(err)
+	}
+
+	w.Write(out)
 
 	return nil
 }
